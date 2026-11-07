@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi stock BoosterStop</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1f; --muted: #6b6b75; --line: #e3e3df;
+  --accent: #3b5bdb; --ok: #2f9e44; --low: #e8890c; --empty: #d6336c; --sold: #d6336c; --load: #2f9e44;
+  --chip: #eef0f7; --shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121215; --panel: #1b1b20; --ink: #ececf1; --muted: #9a9aa6; --line: #2c2c34;
+    --accent: #7b93ff; --ok: #51cf66; --low: #ffa94d; --empty: #f06595; --sold: #f06595; --load: #51cf66;
+    --chip: #262a3a; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header, main { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 14px 0; box-shadow: var(--shadow); }
+.tabs { display: flex; gap: 6px; overflow-x: auto; padding: 12px 0 2px; scrollbar-width: thin; }
+.tab { flex: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 6px 12px; cursor: pointer; font: inherit; }
+.tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 240px; }
+select, input, button.btn { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; min-width: 0; }
+button.btn { cursor: pointer; }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.kpi span { font-size: 12px; color: var(--muted); }
+.chart { width: 100%; height: 190px; display: block; cursor: crosshair; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.floor { margin-bottom: 12px; }
+.floor-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.slot { border: 1px solid var(--line); border-radius: 8px; padding: 7px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.slot.changed { border-color: var(--accent); }
+.slot .top { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.slot img { width: 100%; height: 56px; object-fit: contain; }
+.slot .ph { height: 56px; display: grid; place-items: center; font-size: 24px; }
+.slot .name { font-size: 12px; line-height: 1.25; height: 2.5em; overflow: hidden; }
+.bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.st-ok { background: var(--ok); } .st-low { background: var(--low); } .st-empty { background: var(--empty); }
+.foot { display: flex; justify-content: space-between; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.d-sold { color: var(--sold); } .d-load { color: var(--load); }
+.swap { font-size: 11px; color: var(--accent); }
+a { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+td.n, th.n { text-align: right; }
+.scroll { overflow-x: auto; }
+.chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.empty-msg { padding: 30px; text-align: center; color: var(--muted); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Suivi stock BoosterStop</h1>
+  <div class="muted small" id="status">Chargement…</div>
+</header>
+<main>
+  <nav class="tabs" id="tabs"></nav>
+  <div id="app"><div class="empty-msg">Chargement de l'historique…</div></div>
+</main>
+
+<script>
+const MACHINES = [
+  { slug: 'rive', name: 'La Poste de Rive' },
+  { slug: 'charmilles', name: 'La Poste des Charmilles' },
+  { slug: 'petit-lancy', name: 'La Poste du Petit-Lancy' },
+  { slug: 'plainpalais', name: 'La Poste de Plainpalais' },
+  { slug: 'thonex', name: 'La Poste de Thônex' },
+  { slug: 'carouge', name: 'La Poste de Carouge' },
+  { slug: 'king-jouet-carouge', name: 'King Jouet Carouge' },
+  { slug: 'king-jouet-ecublens', name: 'King Jouet Ecublens' }
+];
+const FLOORS = [[10,19,'Étage 1 (haut)'],[20,29,'Étage 2'],[30,39,'Étage 3'],[40,49,'Étage 4'],[50,59,'Étage 5'],[60,69,'Étage 6 (bas)']];
+const TZ = 'Europe/Zurich';
+const fmtDT = new Intl.DateTimeFormat('fr-CH', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const fmtShort = new Intl.DateTimeFormat('fr-CH', { timeZone: TZ, day: '2-digit', month: '2-digit' });
+const chf = n => 'CHF ' + n.toLocaleString('fr-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let catalog = {}, state = {}, timelines = {};   // slug -> [{t: Date, slots: Map(slot -> {gid, stock, vol, price})}]
+let view = { machine: null, a: null, b: null }; // index des points dans timelines[machine]
+
+async function getJSON(url, fallback) {
+  try { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw 0; return await r.json(); } catch (e) { return fallback; }
+}
+async function load() {
+  state = await getJSON('data/state.json', { months: [] });
+  catalog = await getJSON('data/catalog.json', {});
+  const lines = [];
+  for (const month of state.months || []) {
+    try {
+      const r = await fetch('data/snapshots/' + month + '.jsonl', { cache: 'no-store' });
+      if (r.ok) (await r.text()).split('\n').forEach(l => { if (l.trim()) lines.push(JSON.parse(l)); });
+    } catch (e) {}
+  }
+  lines.sort((x, y) => x.t.localeCompare(y.t));
+  // Chaque ligne contient soit l'état complet (k:1, début de mois), soit seulement les rails modifiés ([n] seul = rail retiré).
+  const cur = {};
+  MACHINES.forEach(m => { timelines[m.slug] = []; cur[m.slug] = new Map(); });
+  const key = map => JSON.stringify([...map.entries()].sort((x, y) => x[0] - y[0]));
+  for (const line of lines) {
+    for (const [slug, slots] of Object.entries(line.m)) {
+      if (!timelines[slug]) continue;
+      const before = key(cur[slug]);
+      const map = line.k ? new Map() : new Map(cur[slug]);
+      slots.forEach(s => s.length === 1 ? map.delete(s[0]) : map.set(s[0], { gid: s[1], stock: s[2], vol: s[3], price: s[4] }));
+      cur[slug] = map;
+      if (key(map) !== before) timelines[slug].push({ t: new Date(line.t), slots: map });
+    }
+  }
+  const lc = state.last_check ? fmtDT.format(new Date(state.last_check)) : '—';
+  document.getElementById('status').textContent = 'Dernière vérification : ' + lc + ' · ' + lines.length + ' instantanés' + (state.errors && state.errors.length ? ' · ⚠ non lues : ' + state.errors.join(', ') : '');
+  const fromUrl = new URLSearchParams(location.search).get('m');
+  selectMachine(MACHINES.some(m => m.slug === fromUrl) ? fromUrl : null);
+}
+
+/* ---------- calculs ---------- */
+function totals(point) {
+  let units = 0, cap = 0, empty = 0, value = 0;
+  if (point) point.slots.forEach(s => { units += s.stock; cap += s.vol; value += s.stock * s.price; if (s.stock === 0) empty++; });
+  return { units, cap, empty, value, slots: point ? point.slots.size : 0 };
+}
+// Mouvements entre deux points consécutifs : ventes = baisses, réassort = hausses ; un changement de produit sur un rail compte comme retrait + chargement.
+function step(prev, cur) {
+  const out = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0;
+  const keys = new Set([...prev.slots.keys(), ...cur.slots.keys()]);
+  keys.forEach(k => {
+    const p = prev.slots.get(k), c = cur.slots.get(k);
+    const r = { sold: 0, revenue: 0, loaded: 0, removed: 0, swap: false };
+    if (p && c && p.gid === c.gid) {
+      if (c.stock < p.stock) { r.sold = p.stock - c.stock; r.revenue = r.sold * p.price; }
+      if (c.stock > p.stock) r.loaded = c.stock - p.stock;
+    } else {
+      r.swap = !!(p && c); if (p) r.removed = p.stock; if (c) r.loaded = c.stock;
+    }
+    if (r.sold || r.loaded || r.removed || r.swap) out.set(k, r);
+    sold += r.sold; revenue += r.revenue; loaded += r.loaded; if (r.swap) swaps++;
+  });
+  return { slots: out, sold, revenue, loaded, swaps };
+}
+function range(tl, a, b) {
+  const per = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0, reloads = 0;
+  for (let i = a + 1; i <= b; i++) {
+    const s = step(tl[i - 1], tl[i]);
+    sold += s.sold; revenue += s.revenue; loaded += s.loaded; swaps += s.swaps; if (s.loaded > 0) reloads++;
+    s.slots.forEach((r, k) => {
+      const acc = per.get(k) || { sold: 0, revenue: 0, loaded: 0, removed: 0, swap: false };
+      acc.sold += r.sold; acc.revenue += r.revenue; acc.loaded += r.loaded; acc.removed += r.removed; acc.swap = acc.swap || r.swap;
+      per.set(k, acc);
+    });
+  }
+  return { per, sold, revenue, loaded, swaps, reloads };
+}
+function reloadEvents(tl) {
+  const ev = [];
+  for (let i = 1; i < tl.length; i++) { const s = step(tl[i - 1], tl[i]); if (s.loaded > 0) ev.push({ i, ...s }); }
+  return ev;
+}
+function salesSince(tl, ms) {
+  const from = Date.now() - ms; let sold = 0, revenue = 0;
+  for (let i = 1; i < tl.length; i++) if (tl[i].t >= from) { const s = step(tl[i - 1], tl[i]); sold += s.sold; revenue += s.revenue; }
+  return { sold, revenue };
+}
+const name = gid => (catalog[gid] && catalog[gid].name) || ('Produit ' + gid);
+const img = gid => (catalog[gid] && catalog[gid].image) || '';
+const stClass = (stock, vol) => stock === 0 ? 'st-empty' : stock <= 2 ? 'st-low' : 'st-ok';
+
+/* ---------- navigation ---------- */
+function renderTabs() {
+  const t = document.getElementById('tabs');
+  t.innerHTML = [{ slug: null, name: 'Vue d’ensemble' }, ...MACHINES].map(m =>
+    `<button class="tab ${view.machine === m.slug ? 'active' : ''}" data-m="${m.slug || ''}">${esc(m.name)}</button>`).join('');
+  t.querySelectorAll('.tab').forEach(b => b.onclick = () => selectMachine(b.dataset.m || null));
+}
+function selectMachine(slug) {
+  view.machine = slug;
+  try { history.replaceState(null, '', slug ? '?m=' + slug : location.pathname); } catch (e) {}
+  if (slug) {
+    const tl = timelines[slug], ev = reloadEvents(tl);
+    if (ev.length) { view.b = ev[ev.length - 1].i; view.a = view.b - 1; }
+    else { view.a = 0; view.b = Math.max(0, tl.length - 1); }
+  }
+  renderTabs(); render();
+}
+function render() { view.machine ? renderMachine() : renderOverview(); }
+
+/* ---------- vue d'ensemble ---------- */
+function renderOverview() {
+  const rows = MACHINES.map(m => {
+    const tl = timelines[m.slug], last = tl[tl.length - 1], t = totals(last), ev = reloadEvents(tl);
+    const d1 = salesSince(tl, 864e5), d7 = salesSince(tl, 7 * 864e5);
+    return { m, t, last, ev, d1, d7 };
+  });
+  const sum = rows.reduce((a, r) => ({ units: a.units + r.t.units, cap: a.cap + r.t.cap, empty: a.empty + r.t.empty, s1: a.s1 + r.d1.sold, r1: a.r1 + r.d1.revenue, s7: a.s7 + r.d7.sold, r7: a.r7 + r.d7.revenue }), { units: 0, cap: 0, empty: 0, s1: 0, r1: 0, s7: 0, r7: 0 });
+  document.getElementById('app').innerHTML = `
+  <section class="panel">
+    <div class="kpis">
+      <div class="kpi"><b>${sum.units}</b><span>unités en stock (${sum.cap ? Math.round(100 * sum.units / sum.cap) : 0} % de la capacité)</span></div>
+      <div class="kpi"><b>${sum.empty}</b><span>emplacements vides</span></div>
+      <div class="kpi"><b>${sum.s1}</b><span>ventes sur 24 h · ${chf(sum.r1)}</span></div>
+      <div class="kpi"><b>${sum.s7}</b><span>ventes sur 7 jours · ${chf(sum.r7)}</span></div>
+    </div>
+  </section>
+  <section class="panel scroll">
+    <h2>Par machine</h2>
+    <table>
+      <thead><tr><th>Machine</th><th class="n">Stock</th><th class="n">Remplissage</th><th class="n">Vides</th><th class="n">Ventes 24 h</th><th class="n">Ventes 7 j</th><th>Dernier reload</th><th>Dernier changement</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td><a href="?m=${r.m.slug}" data-m="${r.m.slug}">${esc(r.m.name)}</a></td>
+        <td class="n">${r.last ? r.t.units : '—'}</td>
+        <td class="n">${r.t.cap ? Math.round(100 * r.t.units / r.t.cap) + ' %' : '—'}</td>
+        <td class="n">${r.last ? r.t.empty : '—'}</td>
+        <td class="n">${r.d1.sold} <span class="muted small">${chf(r.d1.revenue)}</span></td>
+        <td class="n">${r.d7.sold} <span class="muted small">${chf(r.d7.revenue)}</span></td>
+        <td>${r.ev.length ? fmtDT.format(timelines[r.m.slug][r.ev[r.ev.length - 1].i].t) + ` <span class="chip d-load">+${r.ev[r.ev.length - 1].loaded}</span>` : '<span class="muted">aucun</span>'}</td>
+        <td>${r.last ? fmtDT.format(r.last.t) : '—'}</td></tr>`).join('')}</tbody>
+    </table>
+    <p class="hint">Les ventes sont les baisses de stock entre deux instantanés ; le CA est estimé au prix affiché. Un « reload » est un instantané où au moins un emplacement a été rechargé.</p>
+  </section>`;
+  document.querySelectorAll('a[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); selectMachine(a.dataset.m); });
+}
+
+/* ---------- vue machine ---------- */
+function pointLabel(tl, i) {
+  const s = i > 0 ? step(tl[i - 1], tl[i]) : null;
+  let tag = '';
+  if (s && s.loaded) tag = ' ⟳ reload +' + s.loaded;
+  else if (s && s.sold) tag = ' −' + s.sold;
+  return fmtDT.format(tl[i].t) + tag;
+}
+function renderMachine() {
+  const slug = view.machine, m = MACHINES.find(x => x.slug === slug), tl = timelines[slug];
+  const app = document.getElementById('app');
+  if (!tl.length) { app.innerHTML = `<div class="panel empty-msg">Pas encore d'instantané pour ${esc(m.name)}.</div>`; return; }
+  const a = Math.min(view.a, view.b), b = Math.max(view.a, view.b);
+  const A = tl[a], B = tl[b], tA = totals(A), tB = totals(B), r = range(tl, a, b), ev = reloadEvents(tl);
+  const opts = sel => tl.map((p, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(pointLabel(tl, i))}</option>`).join('');
+  const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+
+  app.innerHTML = `
+  <section class="panel">
+    <h2>${esc(m.name)} : comparer deux moments</h2>
+    <div class="row">
+      <label class="f">Point A (avant)<select id="selA">${opts(a)}</select></label>
+      <label class="f">Point B (après)<select id="selB">${opts(b)}</select></label>
+      <label class="f" style="flex:0 1 200px">…ou B à une date précise<input type="datetime-local" id="dtB" value="${toLocalInput(B.t)}"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="prevR">◀ reload précédent</button>
+      <button class="btn" id="nextR">reload suivant ▶</button>
+      <button class="btn" id="last24">24 dernières heures</button>
+      <button class="btn" id="all">Tout l'historique</button>
+    </div>
+    <svg class="chart" id="chart" role="img" aria-label="Stock total dans le temps"></svg>
+    <div class="legend"><span><i style="background:var(--accent)"></i>stock total</span><span><i style="background:var(--load)"></i>reload</span><span>Clic = point B · Maj + clic = point A</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>De A à B <span class="muted small">(${fmtDT.format(A.t)} → ${fmtDT.format(B.t)})</span></h2>
+    <div class="kpis">
+      <div class="kpi"><b>${tA.units} → ${tB.units}</b><span>unités en stock (${tA.cap ? Math.round(100 * tA.units / tA.cap) : 0} % → ${tB.cap ? Math.round(100 * tB.units / tB.cap) : 0} %)</span></div>
+      <div class="kpi"><b class="d-sold">${r.sold}</b><span>unités vendues · ${chf(r.revenue)}</span></div>
+      <div class="kpi"><b class="d-load">+${r.loaded}</b><span>unités rechargées · ${r.reloads} reload${r.reloads > 1 ? 's' : ''}</span></div>
+      <div class="kpi"><b>${tA.empty} → ${tB.empty}</b><span>emplacements vides</span></div>
+      <div class="kpi"><b>${r.swaps}</b><span>changements de produit</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>La machine au point B</h2>
+    <div class="legend" style="margin-bottom:10px"><span><i class="st-ok"></i>&gt; 2</span><span><i class="st-low"></i>1-2</span><span><i class="st-empty"></i>vide</span><span><span class="d-sold">−vendus</span> / <span class="d-load">+rechargés</span> entre A et B</span></div>
+    ${floorsHTML(A, B, r.per)}
+  </section>
+
+  <section class="panel scroll">
+    <h2>Détail des mouvements entre A et B</h2>
+    ${movesTable(A, B, r.per)}
+  </section>
+
+  <section class="panel scroll">
+    <h2>Reloads détectés (${ev.length})</h2>
+    ${ev.length ? `<table><thead><tr><th>Quand</th><th class="n">Rechargé</th><th class="n">Rails touchés</th><th class="n">Nouveaux produits</th><th></th></tr></thead><tbody>
+      ${ev.slice().reverse().map(e => `<tr><td>${fmtDT.format(tl[e.i].t)} <span class="muted small">(précédent : ${fmtDT.format(tl[e.i - 1].t)})</span></td>
+        <td class="n d-load">+${e.loaded}</td><td class="n">${[...e.slots.values()].filter(x => x.loaded).length}</td><td class="n">${e.swaps}</td>
+        <td><button class="btn" data-ev="${e.i}">Avant / après</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Aucun reload dans l’historique pour l’instant.</p>'}
+  </section>`;
+
+  const set = (na, nb) => { view.a = na; view.b = nb; renderMachine(); };
+  document.getElementById('selA').onchange = e => set(+e.target.value, view.b);
+  document.getElementById('selB').onchange = e => set(view.a, +e.target.value);
+  document.getElementById('dtB').onchange = e => {
+    const t = new Date(e.target.value).getTime(); let idx = 0;
+    tl.forEach((p, i) => { if (p.t.getTime() <= t) idx = i; });
+    set(Math.min(view.a, idx), idx);
+  };
+  const evIdx = ev.map(e => e.i);
+  document.getElementById('prevR').onclick = () => { const i = evIdx.filter(x => x < b).pop(); if (i) set(i - 1, i); };
+  document.getElementById('nextR').onclick = () => { const i = evIdx.find(x => x > b); if (i) set(i - 1, i); };
+  document.getElementById('last24').onclick = () => { const from = B.t.getTime() - 864e5; let i = tl.findIndex(p => p.t.getTime() >= from); set(Math.max(0, i - 1), tl.length - 1); };
+  document.getElementById('all').onclick = () => set(0, tl.length - 1);
+  app.querySelectorAll('[data-ev]').forEach(btn => btn.onclick = () => { const i = +btn.dataset.ev; set(i - 1, i); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  drawChart(tl, a, b, evIdx, set);
+}
+
+function floorsHTML(A, B, per) {
+  const nums = [...new Set([...A.slots.keys(), ...B.slots.keys()])].sort((x, y) => x - y);
+  const groups = FLOORS.map(([lo, hi, label]) => ({ label, nums: nums.filter(n => n >= lo && n <= hi) }));
+  const other = nums.filter(n => !FLOORS.some(([lo, hi]) => n >= lo && n <= hi));
+  if (other.length) groups.push({ label: 'Autres rails', nums: other });
+  return groups.filter(g => g.nums.length).map(g => `<div class="floor"><div class="floor-label">${g.label}</div><div class="slots">
+    ${g.nums.map(n => {
+      const s = B.slots.get(n), p = A.slots.get(n), mv = per.get(n);
+      if (!s) return `<div class="slot"><div class="top"><span>${n}</span></div><div class="ph">∅</div><div class="name muted">Rail retiré</div></div>`;
+      const pct = s.vol ? Math.round(100 * s.stock / s.vol) : 0, im = img(s.gid);
+      return `<div class="slot ${mv ? 'changed' : ''}" title="${esc(name(s.gid))}">
+        <div class="top"><span>${n}</span><span>CHF ${s.price.toFixed(2)}</span></div>
+        ${im ? `<img src="${esc(im)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'🃏'}))">` : '<div class="ph">🃏</div>'}
+        <div class="name">${esc(name(s.gid))}</div>
+        <div class="bar"><i class="${stClass(s.stock, s.vol)}" style="width:${pct}%"></i></div>
+        <div class="foot"><span><b>${s.stock}</b>/${s.vol}${p && p.gid === s.gid && p.stock !== s.stock ? ` <span class="muted">(${p.stock})</span>` : ''}</span>
+          <span>${mv && mv.sold ? `<span class="d-sold">−${mv.sold}</span> ` : ''}${mv && mv.loaded ? `<span class="d-load">+${mv.loaded}</span>` : ''}</span></div>
+        ${mv && mv.swap ? `<div class="swap">↺ avant : ${esc(p ? name(p.gid) : '—')}</div>` : ''}
+      </div>`;
+    }).join('')}</div></div>`).join('');
+}
+
+function movesTable(A, B, per) {
+  const rows = [...per.entries()].sort((x, y) => x[0] - y[0]);
+  if (!rows.length) return '<p class="muted">Aucun mouvement entre ces deux points.</p>';
+  return `<table><thead><tr><th>Rail</th><th>Produit</th><th class="n">Stock A</th><th class="n">Stock B</th><th class="n">Vendus</th><th class="n">CA estimé</th><th class="n">Rechargés</th></tr></thead><tbody>
+    ${rows.map(([n, mv]) => { const a = A.slots.get(n), b = B.slots.get(n); return `<tr>
+      <td>${n}</td><td>${esc(b ? name(b.gid) : name(a.gid))}${mv.swap ? `<div class="swap">↺ remplace ${esc(a ? name(a.gid) : '—')}${mv.removed ? ` (${mv.removed} retiré${mv.removed > 1 ? 's' : ''})` : ''}</div>` : ''}</td>
+      <td class="n">${a ? a.stock : '—'}</td><td class="n">${b ? b.stock : '—'}</td>
+      <td class="n d-sold">${mv.sold || ''}</td><td class="n">${mv.revenue ? chf(mv.revenue) : ''}</td><td class="n d-load">${mv.loaded ? '+' + mv.loaded : ''}</td></tr>`; }).join('')}
+  </tbody></table>`;
+}
+
+function drawChart(tl, a, b, evIdx, set) {
+  const svg = document.getElementById('chart');
+  const W = svg.clientWidth || 800, H = 190, pl = 36, pr = 10, pt = 12, pb = 22;
+  const vals = tl.map(p => totals(p).units), t0 = tl[0].t.getTime(), t1 = Math.max(tl[tl.length - 1].t.getTime(), Date.parse(state.last_check || 0) || 0, t0 + 1);
+  const max = Math.max(1, ...vals), x = t => pl + (W - pl - pr) * (t - t0) / (t1 - t0), y = v => pt + (H - pt - pb) * (1 - v / max);
+  let d = '';
+  tl.forEach((p, i) => { const X = x(p.t.getTime()), Y = y(vals[i]); d += i ? `H${X.toFixed(1)}V${Y.toFixed(1)}` : `M${X.toFixed(1)},${Y.toFixed(1)}`; });
+  d += `H${x(t1).toFixed(1)}`;
+  const ticks = [0, .5, 1].map(f => Math.round(max * f));
+  const nDays = Math.max(1, Math.round((t1 - t0) / 864e5)), dayStep = Math.ceil(nDays / 6);
+  let xt = '';
+  const startDay = new Date(t0); startDay.setHours(0, 0, 0, 0);
+  for (let t = startDay.getTime() + 864e5, k = 0; t < t1; t += 864e5, k++) if (k % dayStep === 0) xt += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${fmtShort.format(new Date(t))}</text><line x1="${x(t)}" x2="${x(t)}" y1="${pt}" y2="${H - pb}" stroke="var(--line)"/>`;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `
+    ${ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('')}
+    ${xt}
+    <rect x="${x(tl[a].t.getTime())}" y="${pt}" width="${Math.max(2, x(tl[b].t.getTime()) - x(tl[a].t.getTime()))}" height="${H - pt - pb}" fill="var(--accent)" opacity=".10"/>
+    ${evIdx.map(i => `<line x1="${x(tl[i].t.getTime())}" x2="${x(tl[i].t.getTime())}" y1="${pt}" y2="${H - pb}" stroke="var(--load)" stroke-dasharray="3 3"/>`).join('')}
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${[['A', a], ['B', b]].map(([l, i]) => `<circle cx="${x(tl[i].t.getTime())}" cy="${y(vals[i])}" r="4" fill="var(--accent)"/><text x="${x(tl[i].t.getTime()) + 6}" y="${y(vals[i]) - 6}" style="fill:var(--ink);font-weight:600">${l}</text>`).join('')}`;
+  svg.onclick = e => {
+    const rect = svg.getBoundingClientRect(), t = t0 + (t1 - t0) * ((e.clientX - rect.left) * W / rect.width - pl) / (W - pl - pr);
+    let idx = 0; tl.forEach((p, i) => { if (p.t.getTime() <= t) idx = i; });
+    e.shiftKey ? set(idx, view.b) : set(view.a, idx);
+  };
+}
+window.addEventListener('resize', () => { if (view.machine) renderMachine(); });
+load();
+</script>
+</body>
+</html>
