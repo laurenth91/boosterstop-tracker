@@ -9,13 +9,20 @@
   --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1f; --muted: #6b6b75; --line: #e3e3df;
   --accent: #3b5bdb; --ok: #2f9e44; --low: #e8890c; --empty: #d6336c; --sold: #d6336c; --load: #2f9e44;
   --chip: #eef0f7; --shadow: 0 1px 2px rgba(0,0,0,.06);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #121215; --panel: #1b1b20; --ink: #ececf1; --muted: #9a9aa6; --line: #2c2c34;
     --accent: #7b93ff; --ok: #51cf66; --low: #ffa94d; --empty: #f06595; --sold: #f06595; --load: #51cf66;
     --chip: #262a3a; --shadow: none;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #121215; --panel: #1b1b20; --ink: #ececf1; --muted: #9a9aa6; --line: #2c2c34;
+  --accent: #7b93ff; --ok: #51cf66; --low: #ffa94d; --empty: #f06595; --sold: #f06595; --load: #51cf66; --chip: #262a3a; --shadow: none;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -69,6 +76,18 @@ details.cfg summary { cursor: pointer; font-weight: 600; }
 details.cfg td input { width: 64px; }
 details.cfg td select { max-width: 320px; }
 .tag { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 5px; background: var(--chip); color: var(--muted); }
+.viz { position: relative; }
+.viz svg { width: 100%; display: block; }
+.viz svg text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.viz .hit { fill: transparent; cursor: default; }
+.viz .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12); display: none; min-width: 160px; z-index: 2; }
+.viz .tip b { font-variant-numeric: tabular-nums; }
+.viz .tip .r { display: flex; justify-content: space-between; gap: 12px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; border: 0; background: var(--panel); color: var(--ink); padding: 5px 10px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+.chart-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 </style>
 </head>
@@ -93,6 +112,7 @@ const MACHINES = [
   { slug: 'king-jouet-carouge', name: 'King Jouet Carouge' },
   { slug: 'king-jouet-ecublens', name: 'King Jouet Ecublens' }
 ];
+MACHINES.forEach((m, i) => m.color = `var(--s${i + 1})`);
 const FLOORS = [[10,19,'Étage 1 (haut)'],[20,29,'Étage 2'],[30,39,'Étage 3'],[40,49,'Étage 4'],[50,59,'Étage 5'],[60,69,'Étage 6 (bas)']];
 const TZ = 'Europe/Zurich';
 const fmtDT = new Intl.DateTimeFormat('fr-CH', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -294,12 +314,20 @@ function renderOverview() {
       <div class="kpi"><b>${sum.s7}</b><span>ventes sur 7 jours · ${chf(sum.r7)}</span></div>
     </div>
   </section>
+  <section class="panel">
+    <div class="chart-head"><h2 style="margin:0">Chiffre d’affaires estimé par jour et par machine</h2>${periodHTML('perO')}</div>
+    <div class="legend" style="margin-bottom:8px">${MACHINES.map(m => `<span><i style="background:${m.color}"></i>${esc(m.name)}</span>`).join('')}</div>
+    <div class="viz" id="caO"><svg role="img" aria-label="Chiffre d’affaires par jour, empilé par machine"></svg><div class="tip"></div></div>
+    <h2 style="margin-top:16px">CA sur ${PERIOD} jours, par machine</h2>
+    <div id="rankO"></div>
+    <p class="hint">Ventes (baisses de stock) × prix affiché, par jour (heure de Genève). Les displays ouverts pendant un reload ne comptent pas. Chaque machine garde sa couleur partout.</p>
+  </section>
   <section class="panel scroll">
     <h2>Par machine</h2>
     <table>
       <thead><tr><th>Machine</th><th class="n">Stock</th><th class="n">Remplissage</th><th class="n">Vides</th><th class="n">Ventes 24 h</th><th class="n">Ventes 7 j</th><th>Dernier reload</th><th>Dernier changement</th></tr></thead>
       <tbody>${rows.map(r => `<tr>
-        <td><a href="?m=${r.m.slug}" data-m="${r.m.slug}">${esc(r.m.name)}</a></td>
+        <td><i class="sw" style="background:${r.m.color}"></i><a href="?m=${r.m.slug}" data-m="${r.m.slug}">${esc(r.m.name)}</a></td>
         <td class="n">${r.last ? r.t.units : '—'}</td>
         <td class="n">${r.t.cap ? Math.round(100 * r.t.units / r.t.cap) + ' %' : '—'}</td>
         <td class="n">${r.last ? r.t.empty : '—'}</td>
@@ -311,6 +339,10 @@ function renderOverview() {
     <p class="hint">Les ventes sont les baisses de stock entre deux instantanés ; le CA est estimé au prix affiché. Un « reload » regroupe les rechargements espacés de moins d’une heure. Pendant un reload, un display retiré alors que son booster est rechargé compte comme ouvert, pas comme vendu.</p>
   </section>`;
   document.querySelectorAll('a[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); selectMachine(a.dataset.m); });
+  bindPeriod('perO', () => renderOverview());
+  const days = lastDays(PERIOD), series = MACHINES.map(m => ({ m, name: m.name, color: m.color, data: dailyRevenue(timelines[m.slug]) }));
+  drawDailyBars(document.getElementById('caO'), days, series);
+  document.getElementById('rankO').innerHTML = rankingHTML(series.map(s => ({ m: s.m, ca: days.reduce((t, d) => t + ((s.data[d] || {}).ca || 0), 0) })).sort((p, q) => q.ca - p.ca));
 }
 
 /* ---------- vue machine ---------- */
@@ -372,6 +404,13 @@ function renderMachine() {
   </section>
 
   <section class="panel">
+    <div class="chart-head"><h2 style="margin:0">Chiffre d’affaires estimé par jour</h2>${periodHTML('perM')}</div>
+    <div class="small muted" id="caSum"></div>
+    <div class="viz" id="caM"><svg role="img" aria-label="Chiffre d’affaires par jour"></svg><div class="tip"></div></div>
+    <p class="hint">Ventes (baisses de stock) × prix affiché, par jour (heure de Genève). Les displays ouverts pendant un reload ne comptent pas. La zone teintée correspond à la période A → B.</p>
+  </section>
+
+  <section class="panel">
     <h2>La machine au point B</h2>
     <div class="legend" style="margin-bottom:10px"><span><i class="st-ok"></i>&gt; 2</span><span><i class="st-low"></i>1-2</span><span><i class="st-empty"></i>vide</span><span><span class="d-sold">−vendus</span> / <span class="d-load">+rechargés</span> entre A et B</span></div>
     ${floorsHTML(A, B, r.per)}
@@ -409,7 +448,12 @@ function renderMachine() {
   document.getElementById('all').onclick = () => set(0, tl.length - 1);
   app.querySelectorAll('[data-ev]').forEach(btn => btn.onclick = () => { const x = ev[+btn.dataset.ev]; set(x.a, x.b); window.scrollTo({ top: 0, behavior: 'smooth' }); });
   bindBoxSettings(() => renderMachine());
+  bindPeriod('perM', () => renderMachine());
   drawChart(tl, a, b, evIdx, set);
+  { const days = lastDays(PERIOD), data = dailyRevenue(tl);
+    const total = days.reduce((s, d) => s + ((data[d] || {}).ca || 0), 0), units = days.reduce((s, d) => s + ((data[d] || {}).n || 0), 0);
+    document.getElementById('caSum').textContent = `${chf(total)} sur ${PERIOD} jours · ${units} unités vendues`;
+    drawDailyBars(document.getElementById('caM'), days, [{ name: m.name, color: m.color, data }], { band: [dayKey(A.t), dayKey(B.t)] }); }
 }
 
 function floorsHTML(A, B, per) {
@@ -500,6 +544,75 @@ function bindBoxSettings(rerender) {
   };
 }
 
+/* ---------- chiffre d'affaires par jour ---------- */
+const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+const dayKey = d => dayFmt.format(d);
+const dayLabel = k => k.slice(8, 10) + '.' + k.slice(5, 7);
+const dayLong = k => new Intl.DateTimeFormat('fr-CH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(k + 'T12:00:00Z'));
+let PERIOD = 30;
+try { PERIOD = +localStorage.getItem('bs-period') || 30; } catch (e) {}
+function dailyRevenue(tl) {
+  const m = {};
+  for (let i = 1; i < tl.length; i++) { const s = step(tl[i - 1], tl[i]); if (s.revenue || s.sold) { const k = dayKey(tl[i].t); m[k] = m[k] || { ca: 0, n: 0 }; m[k].ca += s.revenue; m[k].n += s.sold; } }
+  return m;
+}
+function lastDays(n) { const out = [], now = Date.now(); for (let k = n - 1; k >= 0; k--) out.push(dayKey(new Date(now - k * 864e5))); return [...new Set(out)]; }
+const chf0 = n => 'CHF ' + Math.round(n).toLocaleString('fr-CH');
+function niceMax(v) { if (v <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+function periodHTML(id) {
+  return `<div class="seg" role="group" aria-label="Période" id="${id}">${[7, 30, 90].map(n => `<button data-p="${n}" class="${PERIOD === n ? 'on' : ''}">${n} j</button>`).join('')}</div>`;
+}
+function bindPeriod(id, rerender) {
+  document.querySelectorAll('#' + id + ' button').forEach(b => b.onclick = () => { PERIOD = +b.dataset.p; try { localStorage.setItem('bs-period', PERIOD); } catch (e) {} rerender(); });
+}
+const roundTop = (x, y, w, h, r) => { r = Math.min(r, w / 2, h); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; };
+// Barres par jour, empilées par série (une couleur par machine). series: [{name, color, data: {jour: {ca, n}}}]
+function drawDailyBars(el, days, series, opts = {}) {
+  const svg = el.querySelector('svg'), tip = el.querySelector('.tip');
+  const W = svg.clientWidth || 800, H = 220, pl = 80, pr = 8, pt = 10, pb = 24;
+  const tot = days.map(d => series.reduce((s, x) => s + ((x.data[d] || {}).ca || 0), 0));
+  const max = niceMax(Math.max(...tot, 0)), slot = (W - pl - pr) / days.length, bw = Math.max(2, Math.min(28, slot * 0.72));
+  const y = v => pt + (H - pt - pb) * (1 - v / max), x = i => pl + slot * i + (slot - bw) / 2;
+  const every = Math.ceil(days.length / Math.max(2, Math.floor((W - pl) / 52)));
+  let g = [0, 0.5, 1].map(f => `<line x1="${pl}" x2="${W - pr}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="var(--line)"/><text x="${pl - 6}" y="${y(max * f) + 4}" text-anchor="end">${chf0(max * f)}</text>`).join('');
+  if (opts.band) { const i0 = days.indexOf(opts.band[0]), i1 = days.indexOf(opts.band[1]); if (i0 >= 0 || i1 >= 0) { const a = Math.max(0, i0 < 0 ? 0 : i0), b = i1 < 0 ? days.length - 1 : i1; g += `<rect x="${pl + slot * a}" y="${pt}" width="${slot * (b - a + 1)}" height="${H - pt - pb}" fill="var(--accent)" opacity=".08"/>`; } }
+  days.forEach((d, i) => {
+    let base = 0; const segs = series.map(s => ({ s, v: (s.data[d] || {}).ca || 0 })).filter(z => z.v > 0);
+    segs.forEach((z, k) => {
+      const y0 = y(base), y1 = y(base + z.v), top = k === segs.length - 1, gap = k > 0 ? 2 : 0;
+      const hgt = Math.max(0, y0 - y1 - gap);
+      if (hgt > 0) g += top ? `<path d="${roundTop(x(i), y1, bw, hgt, 4)}" fill="${z.s.color}" data-d="${i}"/>` : `<rect x="${x(i)}" y="${y1}" width="${bw}" height="${hgt}" fill="${z.s.color}" data-d="${i}"/>`;
+      base += z.v;
+    });
+    if (i % every === 0 || i === days.length - 1) g += `<text x="${pl + slot * i + slot / 2}" y="${H - 6}" text-anchor="middle">${dayLabel(d)}</text>`;
+    g += `<rect class="hit" x="${pl + slot * i}" y="${pt}" width="${slot}" height="${H - pt - pb}" data-i="${i}"/>`;
+  });
+  g += `<line x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}" stroke="var(--muted)" opacity=".5"/>`;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H); svg.innerHTML = g;
+  svg.querySelectorAll('.hit').forEach(r => {
+    r.onmousemove = e => {
+      const i = +r.dataset.i, d = days[i];
+      const rows = series.map(s => ({ s, v: s.data[d] || { ca: 0, n: 0 } })).filter(z => z.v.ca > 0).sort((p, q) => q.v.ca - p.v.ca);
+      tip.innerHTML = `<div style="margin-bottom:4px"><b>${dayLong(d)}</b></div>` + (rows.length
+        ? (series.length > 1 ? rows.map(z => `<div class="r"><span><i class="sw" style="background:${z.s.color}"></i>${esc(z.s.name)}</span><b>${chf(z.v.ca)}</b></div>`).join('') + `<div class="r" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px"><span>Total</span><b>${chf(tot[i])}</b></div>`
+          : `<div class="r"><span>CA estimé</span><b>${chf(tot[i])}</b></div><div class="r"><span>Unités vendues</span><b>${rows[0].v.n}</b></div>`)
+        : '<span class="muted">Aucune vente</span>');
+      tip.style.display = 'block';
+      const bx = el.getBoundingClientRect(), tx = e.clientX - bx.left + 14, tw = tip.offsetWidth;
+      tip.style.left = Math.min(tx, bx.width - tw - 4) + 'px'; tip.style.top = Math.max(0, e.clientY - bx.top - 20) + 'px';
+      svg.querySelectorAll('[data-d]').forEach(m => m.style.opacity = +m.dataset.d === i ? 1 : 0.35);
+    };
+    r.onmouseleave = () => { tip.style.display = 'none'; svg.querySelectorAll('[data-d]').forEach(m => m.style.opacity = 1); };
+  });
+}
+// Classement horizontal : CA total de la période par machine, trié, chaque barre à la couleur de sa machine.
+function rankingHTML(rows) {
+  const max = Math.max(...rows.map(r => r.ca), 1);
+  return `<div style="display:grid;grid-template-columns:minmax(120px,190px) 1fr;gap:6px 10px;align-items:center">${rows.map(r => `
+    <div class="small"><i class="sw" style="background:${r.m.color}"></i>${esc(r.m.name)}</div>
+    <div style="display:flex;align-items:center;gap:8px;min-width:0"><div style="height:14px;width:${(100 * r.ca / max).toFixed(1)}%;min-width:${r.ca > 0 ? 3 : 0}px;background:${r.m.color};border-radius:0 4px 4px 0"></div><span class="small" style="white-space:nowrap;font-variant-numeric:tabular-nums">${chf(r.ca)}</span></div>`).join('')}</div>`;
+}
+
 function drawChart(tl, a, b, evIdx, set) {
   const svg = document.getElementById('chart');
   const W = svg.clientWidth || 800, H = 190, pl = 36, pr = 10, pt = 12, pb = 22;
@@ -527,7 +640,7 @@ function drawChart(tl, a, b, evIdx, set) {
     e.shiftKey ? set(idx, view.b) : set(view.a, idx);
   };
 }
-window.addEventListener('resize', () => { if (view.machine) renderMachine(); });
+window.addEventListener('resize', () => { if (!timelines.rive) return; view.machine ? renderMachine() : renderOverview(); });
 load();
 </script>
 </body>

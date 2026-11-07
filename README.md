@@ -5,6 +5,7 @@ Historique du stock des 8 machines BoosterStop en Suisse, avec un tableau de bor
 - voir chaque machine étage par étage, à n'importe quel moment de l'historique ;
 - comparer deux moments précis (point A / point B), en particulier **juste avant et juste après un reload donné** ;
 - compter, entre A et B, les unités vendues, le CA estimé, les unités rechargées, les changements de produit et les **displays ouverts** pour remplir les rangées de boosters ;
+- suivre le **chiffre d'affaires par jour**, par machine et pour l'ensemble ;
 - retrouver tous les reloads détectés, machine par machine.
 
 Tableau de bord : https://laurenth91.github.io/boosterstop-tracker/
@@ -30,14 +31,24 @@ Tableau de bord : https://laurenth91.github.io/boosterstop-tracker/
 
 ## Displays
 
-Le tableau de bord reconnaît les displays et les boîtes, par leur nom ou par un prix d'au moins CHF 60. Il relie chacun au booster de la même langue et de la même extension. Le nombre de boosters par display a une valeur par défaut :
+Le tableau de bord reconnaît les displays et les boîtes, par leur nom ou par un prix d'au moins CHF 60. Il relie chacun au booster de la même langue et de la même extension. `config.json` fixe le nombre de boosters par display, d'après les fiches de revendeurs :
 
-- 36 pour Pokémon FR/EN ;
-- 30 pour Pokémon JP/CN ;
-- 24 pour One Piece, Dragon Ball, Lorcana et Yu-Gi-Oh! ;
-- 9 pour une ETB.
+| Display | Boosters | Source / remarque |
+|---|---|---|
+| 🇨🇳 Storm Emeralda Mega Evolution, Abyss Eye, Ninja Spinner | 30 | 30 en chinois traditionnel et en japonais ; pas de fiche trouvée en chinois simplifié |
+| 🇨🇳 30ᵉ Anniversaire | 20 | 20 boosters de 6 cartes selon les revendeurs, pas confirmé officiellement |
+| 🇯🇵 OP17 One Piece | 24 | confirmé par plusieurs revendeurs |
+| 🇫🇷 Dragon Ball PP14 BT23 | 24 | 24 pour le display B23 ; un « Premium Pack Set » PP14 n'en contient que 4 |
+| 🇬🇧 ETB Héros Transcendants | 9 | |
+| 🇫🇷 Trésor des Illumineurs Lorcana | 8 | |
 
-Ces valeurs sont à vérifier. Elles se corrigent dans **Réglages des displays**, en bas de la vue d'une machine. Les réglages sont enregistrés dans le navigateur. Pour les rendre définitifs pour tout le monde, utilisez le bouton « Copier les réglages » et collez le résultat dans `config.json`.
+Les valeurs se corrigent dans **Réglages des displays**, en bas de la vue d'une machine. Ces réglages restent dans le navigateur. Pour les rendre définitifs, utilisez « Copier les réglages » et collez le résultat dans `config.json`.
+
+## Chiffre d'affaires
+
+- **Vue d'une machine** : barres du CA estimé par jour (heure de Genève), sur 7, 30 ou 90 jours. La période A → B est teintée.
+- **Vue d'ensemble** : barres empilées par jour, avec une couleur fixe par machine, et un classement des machines par CA sur la période.
+- Le CA correspond aux ventes détectées (baisses de stock) multipliées par le prix affiché. Les displays ouverts pendant un reload n'en font pas partie.
 
 ## Réglages GitHub
 

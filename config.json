@@ -1,3 +1,12 @@
 {
- "displays": {}
+ "displays": {
+  "63393": {"name": "🇨🇳 Display Storm Emeralda Mega Evolution Pokémon", "booster": 63394, "per": 30},
+  "66444": {"name": "🇨🇳 Display 30ᵉ Anniversaire Pokémon", "booster": 66446, "per": 20},
+  "67633": {"name": "🇨🇳 Display Abyss Eye Pokémon", "booster": 67497, "per": 30},
+  "67638": {"name": "🇨🇳 Display Ninja Spinner Pokemon", "booster": 67496, "per": 30},
+  "65471": {"name": "🇯🇵 OP17 One Piece The World's Strongest Warriors", "booster": 65472, "per": 24},
+  "69915": {"name": "🇫🇷PP14 BT23 Display Dragon Ball Super", "booster": null, "per": 24},
+  "68067": {"name": "🇬🇧ETB Héros Transcendants Pokémon", "booster": null, "per": 9},
+  "69280": {"name": "🇫🇷Trésor des Illumineurs Disney Lorcana", "booster": null, "per": 8}
+ }
 }
