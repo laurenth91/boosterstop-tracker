@@ -88,6 +88,7 @@ details.cfg td select { max-width: 320px; }
 .seg button { font: inherit; border: 0; background: var(--panel); color: var(--ink); padding: 5px 10px; cursor: pointer; }
 .seg button.on { background: var(--accent); color: #fff; }
 .chart-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+table.rr td, table.rr th { white-space: nowrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 </style>
 </head>
@@ -322,6 +323,7 @@ function renderOverview() {
     <div id="rankO"></div>
     <p class="hint">Ventes (baisses de stock) × prix affiché, par jour (heure de Genève). Les displays ouverts pendant un reload ne comptent pas. Chaque machine garde sa couleur partout.</p>
   </section>
+  <section class="panel scroll">${recentReloadsHTML()}</section>
   <section class="panel scroll">
     <h2>Par machine</h2>
     <table>
@@ -340,9 +342,54 @@ function renderOverview() {
   </section>`;
   document.querySelectorAll('a[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); selectMachine(a.dataset.m); });
   bindPeriod('perO', () => renderOverview());
+  document.querySelectorAll('[data-open]').forEach(btn => btn.onclick = () => { const [slug, a, b] = btn.dataset.open.split(':'); openReload(slug, +a, +b); });
   const days = lastDays(PERIOD), series = MACHINES.map(m => ({ m, name: m.name, color: m.color, data: dailyRevenue(timelines[m.slug]) }));
   drawDailyBars(document.getElementById('caO'), days, series);
   document.getElementById('rankO').innerHTML = rankingHTML(series.map(s => ({ m: s.m, ca: days.reduce((t, d) => t + ((s.data[d] || {}).ca || 0), 0) })).sort((p, q) => q.ca - p.ca));
+}
+
+/* ---------- reloads récents, toutes machines ---------- */
+function recentReloads() {
+  const from = Date.now() - PERIOD * 864e5, out = [];
+  MACHINES.forEach(m => {
+    const tl = timelines[m.slug], ev = reloadEvents(tl);
+    ev.forEach((e, k) => {
+      if (tl[e.b].t < from) return;
+      const r = range(tl, e.a, e.b), fb = boostersFromBoxes(r.prod);
+      let ext = 0, kept = 0; r.prod.forEach((q, g) => { if (boxOf(g)) return; const d = q.loaded - (fb.by[g] || 0); if (d > 0) ext += d; });
+      Object.entries(fb.by).forEach(([g, n]) => { const q = r.prod.get(+g); const d = n - (q ? q.loaded : 0); if (d > 0) kept += d; });
+      const prev = ev[k - 1], since = range(tl, prev ? prev.b : 0, e.a);
+      out.push({ m, e, t: tl[e.b].t, before: totals(tl[e.a]).units, after: totals(tl[e.b]).units, cap: totals(tl[e.b]).cap,
+        loaded: r.loaded, opened: r.opened, boost: fb.total, ext, kept, sold: since.sold, revenue: since.revenue, sinceStart: !prev, sinceT: prev ? tl[prev.b].t : tl[0].t });
+    });
+  });
+  return out.sort((x, y) => y.t - x.t);
+}
+function recentReloadsHTML() {
+  const rows = recentReloads();
+  const T = rows.reduce((a, x) => ({ loaded: a.loaded + x.loaded, opened: a.opened + x.opened, boost: a.boost + x.boost, ext: a.ext + x.ext, kept: a.kept + x.kept, sold: a.sold + x.sold, revenue: a.revenue + x.revenue }), { loaded: 0, opened: 0, boost: 0, ext: 0, kept: 0, sold: 0, revenue: 0 });
+  const extCell = x => `+${x.ext}${x.kept ? ` <span class="muted small">· ${x.kept} des displays pas en machine</span>` : ''}`;
+  if (!rows.length) return `<h2>Reloads récents, toutes machines</h2><p class="muted">Aucun reload détecté sur les ${PERIOD} derniers jours.</p>`;
+  return `<h2>Reloads récents, toutes machines <span class="muted small">(${rows.length} sur ${PERIOD} jours)</span></h2>
+  <table class="rr"><thead><tr><th>Machine</th><th>Quand</th><th class="n">Stock avant → après</th><th class="n">Rechargés</th><th class="n">Displays ouverts</th>
+    <th class="n">Apport extérieur (est.)</th><th class="n">Ventes depuis le reload précédent</th><th class="n">CA depuis le reload précédent</th><th></th></tr></thead><tbody>
+  ${rows.map(x => `<tr>
+    <td><i class="sw" style="background:${x.m.color}"></i>${esc(x.m.name)}</td>
+    <td>${fmtDT.format(x.t)}</td>
+    <td class="n">${x.before} → ${x.after} <span class="muted small">(${x.cap ? Math.round(100 * x.after / x.cap) : 0} %)</span></td>
+    <td class="n d-load">+${x.loaded}</td>
+    <td class="n">${x.opened ? x.opened + ` <span class="muted small">≈ ${x.boost} boosters</span>` : ''}</td>
+    <td class="n">${extCell(x)}</td>
+    <td class="n">${x.sold} <span class="muted small">${x.sinceStart ? 'depuis le début' : 'depuis ' + fmtDT.format(x.sinceT)}</span></td>
+    <td class="n">${chf(x.revenue)}</td>
+    <td><button class="btn" data-open="${x.m.slug}:${x.e.a}:${x.e.b}">Avant / après</button></td></tr>`).join('')}
+  </tbody><tfoot><tr style="font-weight:600"><td colspan="3">Total (${rows.length} reload${rows.length > 1 ? 's' : ''})</td>
+    <td class="n d-load">+${T.loaded}</td><td class="n">${T.opened ? T.opened + ` <span class="muted small">≈ ${T.boost} boosters</span>` : ''}</td>
+    <td class="n">${extCell(T)}</td><td class="n">${T.sold}</td><td class="n">${chf(T.revenue)}</td><td></td></tr></tfoot></table>
+  <p class="hint">Apport extérieur = boosters rechargés au-delà de ce que les displays ouverts du même produit peuvent fournir, calculé produit par produit. « des displays pas en machine » = boosters estimés sortis des displays mais pas rechargés dans cette machine. Ventes et CA comptés entre la fin du reload précédent de la même machine et le début de celui-ci. Période : boutons 7 / 30 / 90 j ci-dessus.</p>`;
+}
+function openReload(slug, a, b) {
+  selectMachine(slug); view.a = a; view.b = b; renderMachine(); window.scrollTo({ top: 0 });
 }
 
 /* ---------- vue machine ---------- */
