@@ -65,6 +65,10 @@ td.n, th.n { text-align: right; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .empty-msg { padding: 30px; text-align: center; color: var(--muted); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+details.cfg summary { cursor: pointer; font-weight: 600; }
+details.cfg td input { width: 64px; }
+details.cfg td select { max-width: 320px; }
+.tag { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 5px; background: var(--chip); color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 </style>
 </head>
@@ -96,7 +100,7 @@ const fmtShort = new Intl.DateTimeFormat('fr-CH', { timeZone: TZ, day: '2-digit'
 const chf = n => 'CHF ' + n.toLocaleString('fr-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-let catalog = {}, state = {}, timelines = {};   // slug -> [{t: Date, slots: Map(slot -> {gid, stock, vol, price})}]
+let catalog = {}, state = {}, timelines = {}, config = { displays: {} };   // slug -> [{t: Date, slots: Map(slot -> {gid, stock, vol, price})}]
 let view = { machine: null, a: null, b: null }; // index des points dans timelines[machine]
 
 async function getJSON(url, fallback) {
@@ -105,6 +109,7 @@ async function getJSON(url, fallback) {
 async function load() {
   state = await getJSON('data/state.json', { months: [] });
   catalog = await getJSON('data/catalog.json', {});
+  config = await getJSON('config.json', { displays: {} });
   const lines = [];
   for (const month of state.months || []) {
     try {
@@ -127,6 +132,7 @@ async function load() {
       if (key(map) !== before) timelines[slug].push({ t: new Date(line.t), slots: map });
     }
   }
+  buildBoxes();
   const lc = state.last_check ? fmtDT.format(new Date(state.last_check)) : '—';
   document.getElementById('status').textContent = 'Dernière vérification : ' + lc + ' · ' + lines.length + ' instantanés' + (state.errors && state.errors.length ? ' · ⚠ non lues : ' + state.errors.join(', ') : '');
   const fromUrl = new URLSearchParams(location.search).get('m');
@@ -140,12 +146,13 @@ function totals(point) {
   return { units, cap, empty, value, slots: point ? point.slots.size : 0 };
 }
 // Mouvements entre deux points consécutifs : ventes = baisses, réassort = hausses ; un changement de produit sur un rail compte comme retrait + chargement.
+// Pendant un reload, un display qui baisse alors que son booster est rechargé dans le même intervalle est compté comme « ouvert », pas comme vendu.
 function step(prev, cur) {
-  const out = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0;
+  const out = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0, opened = 0;
   const keys = new Set([...prev.slots.keys(), ...cur.slots.keys()]);
   keys.forEach(k => {
     const p = prev.slots.get(k), c = cur.slots.get(k);
-    const r = { sold: 0, revenue: 0, loaded: 0, removed: 0, swap: false };
+    const r = { sold: 0, revenue: 0, loaded: 0, removed: 0, opened: 0, swap: false, pg: p ? p.gid : null, cg: c ? c.gid : null, price: p ? p.price : 0 };
     if (p && c && p.gid === c.gid) {
       if (c.stock < p.stock) { r.sold = p.stock - c.stock; r.revenue = r.sold * p.price; }
       if (c.stock > p.stock) r.loaded = c.stock - p.stock;
@@ -155,24 +162,44 @@ function step(prev, cur) {
     if (r.sold || r.loaded || r.removed || r.swap) out.set(k, r);
     sold += r.sold; revenue += r.revenue; loaded += r.loaded; if (r.swap) swaps++;
   });
-  return { slots: out, sold, revenue, loaded, swaps };
-}
-function range(tl, a, b) {
-  const per = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0, reloads = 0;
-  for (let i = a + 1; i <= b; i++) {
-    const s = step(tl[i - 1], tl[i]);
-    sold += s.sold; revenue += s.revenue; loaded += s.loaded; swaps += s.swaps; if (s.loaded > 0) reloads++;
-    s.slots.forEach((r, k) => {
-      const acc = per.get(k) || { sold: 0, revenue: 0, loaded: 0, removed: 0, swap: false };
-      acc.sold += r.sold; acc.revenue += r.revenue; acc.loaded += r.loaded; acc.removed += r.removed; acc.swap = acc.swap || r.swap;
-      per.set(k, acc);
+  if (loaded > 0 && settings.openMode) {
+    const up = new Set(); out.forEach(r => { if (r.loaded && r.cg != null) up.add(r.cg); });
+    out.forEach(r => {
+      const b = boxOf(r.pg);
+      if (r.sold && b && b.booster != null && up.has(b.booster)) {
+        r.opened = r.sold; opened += r.sold; sold -= r.sold; revenue -= r.revenue; r.sold = 0; r.revenue = 0;
+      }
     });
   }
-  return { per, sold, revenue, loaded, swaps, reloads };
+  return { slots: out, sold, revenue, loaded, swaps, opened };
 }
+function range(tl, a, b) {
+  const per = new Map(), prod = new Map(); let sold = 0, revenue = 0, loaded = 0, swaps = 0, opened = 0, reloads = 0;
+  const P = g => { if (!prod.has(g)) prod.set(g, { sold: 0, revenue: 0, loaded: 0, removed: 0, opened: 0 }); return prod.get(g); };
+  for (let i = a + 1; i <= b; i++) {
+    const s = step(tl[i - 1], tl[i]);
+    sold += s.sold; revenue += s.revenue; loaded += s.loaded; swaps += s.swaps; opened += s.opened; if (s.loaded > 0) reloads++;
+    s.slots.forEach((r, k) => {
+      const acc = per.get(k) || { sold: 0, revenue: 0, loaded: 0, removed: 0, opened: 0, swap: false };
+      acc.sold += r.sold; acc.revenue += r.revenue; acc.loaded += r.loaded; acc.removed += r.removed; acc.opened += r.opened; acc.swap = acc.swap || r.swap;
+      per.set(k, acc);
+      if (r.pg != null) { const q = P(r.pg); q.sold += r.sold; q.revenue += r.revenue; q.removed += r.removed; q.opened += r.opened; }
+      if (r.cg != null && r.loaded) P(r.cg).loaded += r.loaded;
+    });
+  }
+  return { per, prod, sold, revenue, loaded, swaps, opened, reloads };
+}
+// Un reload peut s'étaler sur plusieurs instantanés : les intervalles avec rechargement espacés de moins de RELOAD_GAP sont regroupés.
+const RELOAD_GAP = 60 * 6e4;
 function reloadEvents(tl) {
   const ev = [];
-  for (let i = 1; i < tl.length; i++) { const s = step(tl[i - 1], tl[i]); if (s.loaded > 0) ev.push({ i, ...s }); }
+  for (let i = 1; i < tl.length; i++) {
+    const s = step(tl[i - 1], tl[i]);
+    if (s.loaded <= 0) continue;
+    const last = ev[ev.length - 1];
+    if (last && tl[i].t - tl[last.b].t <= RELOAD_GAP) { last.b = i; last.loaded += s.loaded; last.opened += s.opened; last.swaps += s.swaps; }
+    else ev.push({ a: i - 1, b: i, loaded: s.loaded, opened: s.opened, swaps: s.swaps });
+  }
   return ev;
 }
 function salesSince(tl, ms) {
@@ -182,6 +209,53 @@ function salesSince(tl, ms) {
 }
 const name = gid => (catalog[gid] && catalog[gid].name) || ('Produit ' + gid);
 const img = gid => (catalog[gid] && catalog[gid].image) || '';
+/* ---------- displays ---------- */
+const FLAG_RE = /\p{Regional_Indicator}{2}/u;
+const STOP = new Set(['display', 'booster', 'boosters', 'pokemon', 'box', 'boite', 'de', 'des', 'du', 'la', 'le', 'the', 'of', 'set', 'tcg', 'pack']);
+let BOX = {}, AUTO = {}, settings = { openMode: true, boxes: {} };
+try { settings = Object.assign(settings, JSON.parse(localStorage.getItem('bs-settings') || '{}')); } catch (e) {}
+const saveSettings = () => { try { localStorage.setItem('bs-settings', JSON.stringify(settings)); } catch (e) {} };
+function parseName(gid) {
+  const n = name(gid), flag = (n.match(FLAG_RE) || [''])[0];
+  const toks = n.replace(/\p{Regional_Indicator}/gu, ' ').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).filter(t => t.length > 1 && !STOP.has(t));
+  return { n, flag, toks };
+}
+function lastPrices() { const m = {}; Object.values(timelines).forEach(tl => tl.forEach(p => p.slots.forEach(s => m[s.gid] = s.price))); return m; }
+function defaultPer(gid) {
+  const { n, flag } = parseName(gid), l = n.toLowerCase();
+  if (/etb|elite trainer/.test(l)) return 9;
+  if (/one piece|\bop\d/.test(l) || /dragon ball|lorcana|yu-gi-oh/.test(l)) return 24;
+  if (/magic/.test(l)) return 36;
+  if (flag === '🇯🇵' || flag === '🇨🇳') return 30;
+  return 36;
+}
+function buildBoxes() {
+  const price = lastPrices(), gids = Object.keys(catalog).map(Number);
+  const isBox = g => /display|\betb\b|elite trainer|coffret|\bbox\b/i.test(name(g)) || (price[g] || 0) >= 60;
+  const boxes = gids.filter(isBox), others = gids.filter(g => !isBox(g) && !/mystery|graded|pochette|portfolio/i.test(name(g)));
+  AUTO = {};
+  boxes.forEach(g => {
+    const a = parseName(g); let best = null, score = 0;
+    others.forEach(o => {
+      const b = parseName(o); if (b.flag !== a.flag) return;
+      const inter = a.toks.filter(t => b.toks.includes(t)).length, uni = new Set([...a.toks, ...b.toks]).size;
+      const j = uni ? inter / uni : 0; if (j > score) { score = j; best = o; }
+    });
+    AUTO[g] = { booster: score >= 0.6 ? best : null, per: defaultPer(g) };
+  });
+  BOX = {};
+  boxes.forEach(g => {
+    const c = (config.displays || {})[g] || {}, s = settings.boxes[g] || {};
+    BOX[g] = {
+      booster: 'booster' in s ? s.booster : 'booster' in c ? c.booster : AUTO[g].booster,
+      per: s.per || c.per || AUTO[g].per,
+      checked: !!(s.per || c.per)
+    };
+  });
+}
+const boxOf = gid => gid == null ? null : BOX[gid] || null;
+
 const stClass = (stock, vol) => stock === 0 ? 'st-empty' : stock <= 2 ? 'st-low' : 'st-ok';
 
 /* ---------- navigation ---------- */
@@ -196,7 +270,7 @@ function selectMachine(slug) {
   try { history.replaceState(null, '', slug ? '?m=' + slug : location.pathname); } catch (e) {}
   if (slug) {
     const tl = timelines[slug], ev = reloadEvents(tl);
-    if (ev.length) { view.b = ev[ev.length - 1].i; view.a = view.b - 1; }
+    if (ev.length) { view.a = ev[ev.length - 1].a; view.b = ev[ev.length - 1].b; }
     else { view.a = 0; view.b = Math.max(0, tl.length - 1); }
   }
   renderTabs(); render();
@@ -231,10 +305,10 @@ function renderOverview() {
         <td class="n">${r.last ? r.t.empty : '—'}</td>
         <td class="n">${r.d1.sold} <span class="muted small">${chf(r.d1.revenue)}</span></td>
         <td class="n">${r.d7.sold} <span class="muted small">${chf(r.d7.revenue)}</span></td>
-        <td>${r.ev.length ? fmtDT.format(timelines[r.m.slug][r.ev[r.ev.length - 1].i].t) + ` <span class="chip d-load">+${r.ev[r.ev.length - 1].loaded}</span>` : '<span class="muted">aucun</span>'}</td>
+        <td>${r.ev.length ? fmtDT.format(timelines[r.m.slug][r.ev[r.ev.length - 1].b].t) + ` <span class="chip d-load">+${r.ev[r.ev.length - 1].loaded}</span>` + (r.ev[r.ev.length - 1].opened ? ` <span class="chip">${r.ev[r.ev.length - 1].opened} display(s) ouvert(s)</span>` : '') : '<span class="muted">aucun</span>'}</td>
         <td>${r.last ? fmtDT.format(r.last.t) : '—'}</td></tr>`).join('')}</tbody>
     </table>
-    <p class="hint">Les ventes sont les baisses de stock entre deux instantanés ; le CA est estimé au prix affiché. Un « reload » est un instantané où au moins un emplacement a été rechargé.</p>
+    <p class="hint">Les ventes sont les baisses de stock entre deux instantanés ; le CA est estimé au prix affiché. Un « reload » regroupe les rechargements espacés de moins d’une heure. Pendant un reload, un display retiré alors que son booster est rechargé compte comme ouvert, pas comme vendu.</p>
   </section>`;
   document.querySelectorAll('a[data-m]').forEach(a => a.onclick = e => { e.preventDefault(); selectMachine(a.dataset.m); });
 }
@@ -253,12 +327,18 @@ function renderMachine() {
   if (!tl.length) { app.innerHTML = `<div class="panel empty-msg">Pas encore d'instantané pour ${esc(m.name)}.</div>`; return; }
   const a = Math.min(view.a, view.b), b = Math.max(view.a, view.b);
   const A = tl[a], B = tl[b], tA = totals(A), tB = totals(B), r = range(tl, a, b), ev = reloadEvents(tl);
+  r.reloads = ev.filter(e => e.b > a && e.b <= b).length;
   const opts = sel => tl.map((p, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(pointLabel(tl, i))}</option>`).join('');
   const toLocalInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
 
   app.innerHTML = `
   <section class="panel">
     <h2>${esc(m.name)} : comparer deux moments</h2>
+    <div class="row" style="margin-bottom:10px">
+      <label class="f">Reload à analyser (A = juste avant, B = juste après)<select id="selR"><option value="">${ev.length ? '— choisir un reload —' : 'aucun reload détecté pour l’instant'}</option>
+        ${ev.map((e, k) => ({ e, k })).reverse().map(({ e, k }) => `<option value="${k}" ${e.a === a && e.b === b ? 'selected' : ''}>${esc(fmtDT.format(tl[e.b].t))} · +${e.loaded} rechargés${e.opened ? ' · ' + e.opened + ' display' + (e.opened > 1 ? 's' : '') + ' ouvert' + (e.opened > 1 ? 's' : '') : ''}</option>`).join('')}
+      </select></label>
+    </div>
     <div class="row">
       <label class="f">Point A (avant)<select id="selA">${opts(a)}</select></label>
       <label class="f">Point B (après)<select id="selB">${opts(b)}</select></label>
@@ -282,7 +362,13 @@ function renderMachine() {
       <div class="kpi"><b class="d-load">+${r.loaded}</b><span>unités rechargées · ${r.reloads} reload${r.reloads > 1 ? 's' : ''}</span></div>
       <div class="kpi"><b>${tA.empty} → ${tB.empty}</b><span>emplacements vides</span></div>
       <div class="kpi"><b>${r.swaps}</b><span>changements de produit</span></div>
+      <div class="kpi"><b>${r.opened}</b><span>displays ouverts pour le réassort (≈ ${boostersFromBoxes(r.prod).total} boosters)</span></div>
     </div>
+  </section>
+
+  <section class="panel scroll">
+    <h2>Bilan par produit entre A et B</h2>
+    ${productTable(A, B, r)}
   </section>
 
   <section class="panel">
@@ -298,12 +384,14 @@ function renderMachine() {
 
   <section class="panel scroll">
     <h2>Reloads détectés (${ev.length})</h2>
-    ${ev.length ? `<table><thead><tr><th>Quand</th><th class="n">Rechargé</th><th class="n">Rails touchés</th><th class="n">Nouveaux produits</th><th></th></tr></thead><tbody>
-      ${ev.slice().reverse().map(e => `<tr><td>${fmtDT.format(tl[e.i].t)} <span class="muted small">(précédent : ${fmtDT.format(tl[e.i - 1].t)})</span></td>
-        <td class="n d-load">+${e.loaded}</td><td class="n">${[...e.slots.values()].filter(x => x.loaded).length}</td><td class="n">${e.swaps}</td>
-        <td><button class="btn" data-ev="${e.i}">Avant / après</button></td></tr>`).join('')}</tbody></table>`
+    ${ev.length ? `<table><thead><tr><th>Quand</th><th class="n">Rechargé</th><th class="n">Rails touchés</th><th class="n">Displays ouverts</th><th class="n">Nouveaux produits</th><th></th></tr></thead><tbody>
+      ${ev.map((e, k) => ({ e, k })).reverse().map(({ e, k }) => `<tr><td>${fmtDT.format(tl[e.b].t)} <span class="muted small">(avant : ${fmtDT.format(tl[e.a].t)})</span></td>
+        <td class="n d-load">+${e.loaded}</td><td class="n">${[...range(tl, e.a, e.b).per.values()].filter(x => x.loaded).length}</td><td class="n">${e.opened || ''}</td><td class="n">${e.swaps}</td>
+        <td><button class="btn" data-ev="${k}">Avant / après</button></td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">Aucun reload dans l’historique pour l’instant.</p>'}
-  </section>`;
+  </section>
+
+  <section class="panel scroll">${boxSettingsHTML()}</section>`;
 
   const set = (na, nb) => { view.a = na; view.b = nb; renderMachine(); };
   document.getElementById('selA').onchange = e => set(+e.target.value, view.b);
@@ -313,12 +401,14 @@ function renderMachine() {
     tl.forEach((p, i) => { if (p.t.getTime() <= t) idx = i; });
     set(Math.min(view.a, idx), idx);
   };
-  const evIdx = ev.map(e => e.i);
-  document.getElementById('prevR').onclick = () => { const i = evIdx.filter(x => x < b).pop(); if (i) set(i - 1, i); };
-  document.getElementById('nextR').onclick = () => { const i = evIdx.find(x => x > b); if (i) set(i - 1, i); };
+  const evIdx = ev.map(e => e.b);
+  document.getElementById('selR').onchange = e => { const x = ev[+e.target.value]; if (e.target.value !== '' && x) set(x.a, x.b); };
+  document.getElementById('prevR').onclick = () => { const x = ev.filter(e => e.b < b).pop(); if (x) set(x.a, x.b); };
+  document.getElementById('nextR').onclick = () => { const x = ev.find(e => e.b > b); if (x) set(x.a, x.b); };
   document.getElementById('last24').onclick = () => { const from = B.t.getTime() - 864e5; let i = tl.findIndex(p => p.t.getTime() >= from); set(Math.max(0, i - 1), tl.length - 1); };
   document.getElementById('all').onclick = () => set(0, tl.length - 1);
-  app.querySelectorAll('[data-ev]').forEach(btn => btn.onclick = () => { const i = +btn.dataset.ev; set(i - 1, i); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  app.querySelectorAll('[data-ev]').forEach(btn => btn.onclick = () => { const x = ev[+btn.dataset.ev]; set(x.a, x.b); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  bindBoxSettings(() => renderMachine());
   drawChart(tl, a, b, evIdx, set);
 }
 
@@ -338,7 +428,7 @@ function floorsHTML(A, B, per) {
         <div class="name">${esc(name(s.gid))}</div>
         <div class="bar"><i class="${stClass(s.stock, s.vol)}" style="width:${pct}%"></i></div>
         <div class="foot"><span><b>${s.stock}</b>/${s.vol}${p && p.gid === s.gid && p.stock !== s.stock ? ` <span class="muted">(${p.stock})</span>` : ''}</span>
-          <span>${mv && mv.sold ? `<span class="d-sold">−${mv.sold}</span> ` : ''}${mv && mv.loaded ? `<span class="d-load">+${mv.loaded}</span>` : ''}</span></div>
+          <span>${mv && mv.sold ? `<span class="d-sold">−${mv.sold}</span> ` : ''}${mv && mv.opened ? `<span class="tag" title="displays ouverts pour le réassort">${mv.opened} ouvert${mv.opened > 1 ? 's' : ''}</span> ` : ''}${mv && mv.loaded ? `<span class="d-load">+${mv.loaded}</span>` : ''}</span></div>
         ${mv && mv.swap ? `<div class="swap">↺ avant : ${esc(p ? name(p.gid) : '—')}</div>` : ''}
       </div>`;
     }).join('')}</div></div>`).join('');
@@ -347,12 +437,67 @@ function floorsHTML(A, B, per) {
 function movesTable(A, B, per) {
   const rows = [...per.entries()].sort((x, y) => x[0] - y[0]);
   if (!rows.length) return '<p class="muted">Aucun mouvement entre ces deux points.</p>';
-  return `<table><thead><tr><th>Rail</th><th>Produit</th><th class="n">Stock A</th><th class="n">Stock B</th><th class="n">Vendus</th><th class="n">CA estimé</th><th class="n">Rechargés</th></tr></thead><tbody>
+  return `<table><thead><tr><th>Rail</th><th>Produit</th><th class="n">Stock A</th><th class="n">Stock B</th><th class="n">Vendus</th><th class="n">CA estimé</th><th class="n">Displays ouverts</th><th class="n">Rechargés</th></tr></thead><tbody>
     ${rows.map(([n, mv]) => { const a = A.slots.get(n), b = B.slots.get(n); return `<tr>
       <td>${n}</td><td>${esc(b ? name(b.gid) : name(a.gid))}${mv.swap ? `<div class="swap">↺ remplace ${esc(a ? name(a.gid) : '—')}${mv.removed ? ` (${mv.removed} retiré${mv.removed > 1 ? 's' : ''})` : ''}</div>` : ''}</td>
       <td class="n">${a ? a.stock : '—'}</td><td class="n">${b ? b.stock : '—'}</td>
-      <td class="n d-sold">${mv.sold || ''}</td><td class="n">${mv.revenue ? chf(mv.revenue) : ''}</td><td class="n d-load">${mv.loaded ? '+' + mv.loaded : ''}</td></tr>`; }).join('')}
+      <td class="n d-sold">${mv.sold || ''}</td><td class="n">${mv.revenue ? chf(mv.revenue) : ''}</td><td class="n">${mv.opened || ''}</td><td class="n d-load">${mv.loaded ? '+' + mv.loaded : ''}</td></tr>`; }).join('')}
   </tbody></table>`;
+}
+
+function boostersFromBoxes(prod) {
+  const by = {}; let total = 0;
+  prod.forEach((q, g) => { const b = boxOf(g); if (b && b.booster != null && q.opened) { by[b.booster] = (by[b.booster] || 0) + q.opened * b.per; total += q.opened * b.per; } });
+  return { by, total };
+}
+function productTable(A, B, r) {
+  const sum = (pt, g) => { let s = 0; pt.slots.forEach(x => { if (x.gid === g) s += x.stock; }); return s; };
+  const fb = boostersFromBoxes(r.prod).by;
+  const rows = [...r.prod.entries()].filter(([g, q]) => q.sold || q.loaded || q.removed || q.opened)
+    .sort((x, y) => name(x[0]).localeCompare(name(y[0]), 'fr'));
+  if (!rows.length) return '<p class="muted">Aucun mouvement entre ces deux points.</p>';
+  return `<table><thead><tr><th>Produit</th><th class="n">Stock A</th><th class="n">Stock B</th><th class="n">Vendus</th><th class="n">CA estimé</th><th class="n">Rechargés</th>
+    <th class="n">Displays ouverts</th><th class="n">Boosters issus des displays (est.)</th><th class="n">Écart : rechargés − issus des displays</th></tr></thead><tbody>
+    ${rows.map(([g, q]) => {
+      const box = boxOf(g), from = fb[g] || 0, ext = q.loaded - from;
+      return `<tr><td>${esc(name(g))}${box ? ` <span class="tag">display${box.booster != null ? ' → ' + box.per + ' boosters' : ''}</span>` : ''}</td>
+        <td class="n">${sum(A, g)}</td><td class="n">${sum(B, g)}</td>
+        <td class="n d-sold">${q.sold || ''}</td><td class="n">${q.revenue ? chf(q.revenue) : ''}</td><td class="n d-load">${q.loaded ? '+' + q.loaded : ''}</td>
+        <td class="n">${q.opened ? q.opened + (box && box.booster != null ? ` <span class="muted small">≈ ${q.opened * box.per} boosters</span>` : '') : ''}</td>
+        <td class="n">${from ? '≈ ' + from : ''}</td>
+        <td class="n">${from ? (ext > 0 ? `<span title="Plus de boosters rechargés que ce que les displays ouverts peuvent fournir : apport extérieur">+${ext} <span class="muted small">apport extérieur</span></span>` : ext < 0 ? `<span title="Les displays ouverts contenaient plus de boosters que ceux rechargés">${ext} <span class="muted small">pas en machine</span></span>` : '0') : ''}</td></tr>`;
+    }).join('')}
+  </tbody></table>
+  <p class="hint">« Boosters issus des displays » = displays de ce booster ouverts entre A et B × boosters par display. Écart positif : boosters venus d’ailleurs (stock extérieur). Écart négatif : boosters sortis des displays mais pas mis dans cette machine (gardés en réserve ou mis dans une autre machine). Estimations : un display acheté par un client pendant un reload est compté comme ouvert.</p>`;
+}
+function boxSettingsHTML() {
+  const gids = Object.keys(BOX).map(Number).sort((x, y) => name(x).localeCompare(name(y), 'fr'));
+  const boosters = Object.keys(catalog).map(Number).filter(g => !BOX[g]).sort((x, y) => name(x).localeCompare(name(y), 'fr'));
+  return `<details class="cfg"><summary>Réglages des displays (${gids.length})</summary>
+    <p class="hint">Un display retiré pendant un reload est compté comme ouvert seulement si le booster associé est rechargé dans le même intervalle. Les réglages sont enregistrés dans ce navigateur.</p>
+    <label class="small"><input type="checkbox" id="openMode" ${settings.openMode ? 'checked' : ''}> Compter les displays retirés pendant un reload comme ouverts (pas comme vendus)</label>
+    <table style="margin-top:8px"><thead><tr><th>Display / boîte</th><th>Booster qu’il contient</th><th class="n">Boosters par display</th></tr></thead><tbody>
+    ${gids.map(g => `<tr><td>${esc(name(g))}</td>
+      <td><select data-box="${g}"><option value="">— non relié —</option>${boosters.map(o => `<option value="${o}" ${BOX[g].booster === o ? 'selected' : ''}>${esc(name(o))}</option>`).join('')}</select></td>
+      <td class="n"><input type="number" min="1" max="60" data-per="${g}" value="${BOX[g].per}">${BOX[g].checked ? '' : ' <span class="tag" title="Valeur par défaut, à vérifier">?</span>'}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="row" style="margin-top:8px"><button class="btn" id="cfgCopy">Copier les réglages (config.json)</button><button class="btn" id="cfgReset">Revenir aux valeurs par défaut</button><span class="small muted" id="cfgMsg"></span></div>
+  </details>`;
+}
+function bindBoxSettings(rerender) {
+  const keepOpen = () => { const d = document.querySelector('details.cfg'); return d && d.open; };
+  const apply = () => { const open = keepOpen(); saveSettings(); buildBoxes(); rerender(); if (open) { const d = document.querySelector('details.cfg'); if (d) d.open = true; } };
+  const om = document.getElementById('openMode'); if (!om) return;
+  om.onchange = e => { settings.openMode = e.target.checked; apply(); };
+  document.querySelectorAll('[data-box]').forEach(s => s.onchange = e => { const g = s.dataset.box; settings.boxes[g] = Object.assign({}, settings.boxes[g], { booster: e.target.value === '' ? null : +e.target.value }); apply(); });
+  document.querySelectorAll('[data-per]').forEach(s => s.onchange = e => { const g = s.dataset.per, v = Math.max(1, Math.min(60, +e.target.value || 0)); settings.boxes[g] = Object.assign({}, settings.boxes[g], { per: v }); apply(); });
+  document.getElementById('cfgReset').onclick = () => { settings.boxes = {}; apply(); };
+  document.getElementById('cfgCopy').onclick = async () => {
+    const out = { displays: {} }; Object.entries(BOX).forEach(([g, b]) => out.displays[g] = { name: name(+g), booster: b.booster, per: b.per });
+    const txt = JSON.stringify(out, null, 1);
+    try { await navigator.clipboard.writeText(txt); document.getElementById('cfgMsg').textContent = 'Copié.'; }
+    catch (e) { document.getElementById('cfgMsg').textContent = 'Copie impossible ici.'; }
+  };
 }
 
 function drawChart(tl, a, b, evIdx, set) {
