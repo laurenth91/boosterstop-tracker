@@ -1,9 +1,11 @@
 name: Instantané du stock
 
+# GitHub ne lance les tâches planifiées qu'environ une fois par heure sur ce dépôt.
+# Chaque exécution prend donc 4 instantanés espacés de 15 minutes.
 on:
   schedule:
-    - cron: "*/15 * * * *"   # toutes les 15 min (GitHub peut décaler de quelques minutes)
-  workflow_dispatch:          # bouton « Run workflow » pour un instantané immédiat
+    - cron: "*/15 * * * *"
+  workflow_dispatch:          # bouton « Run workflow » pour lancer une série immédiatement
 
 permissions:
   contents: write
@@ -15,23 +17,29 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Lire les 8 machines
-        run: python collect.py
-      - name: Enregistrer si quelque chose a changé
+      - name: 4 instantanés espacés de 15 minutes
         run: |
           git config user.name  "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
-          git add data
-          if git diff --cached --quiet; then
-            echo "Rien à enregistrer."
-          else
-            git commit -q -m "Instantané $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3 4; do
+            start=$(date +%s)
             git pull -q --rebase
-            git push -q
-          fi
+            python collect.py || echo "Lecture en échec, on réessaie au prochain tour."
+            git add data
+            if git diff --cached --quiet; then
+              echo "Tour $i : rien à enregistrer."
+            else
+              git commit -q -m "Instantané $(date -u +%Y-%m-%dT%H:%MZ)"
+              git pull -q --rebase && git push -q || echo "Push en échec, réessai au prochain tour."
+            fi
+            if [ "$i" -lt 4 ]; then
+              wait=$(( 900 - ($(date +%s) - start) ))
+              [ "$wait" -gt 0 ] && sleep "$wait"
+            fi
+          done
