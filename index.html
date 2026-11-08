@@ -111,7 +111,7 @@ const MACHINES = [
   { slug: 'thonex', name: 'La Poste de Thônex' },
   { slug: 'carouge', name: 'La Poste de Carouge' },
   { slug: 'king-jouet-carouge', name: 'King Jouet Carouge' },
-  { slug: 'king-jouet-ecublens', name: 'King Jouet Ecublens' }
+  { slug: 'king-jouet-ecublens', name: 'King Jouet Ecublens', note: 'à La Poste de Meyrin jusqu’au 3.11.2026' }
 ];
 MACHINES.forEach((m, i) => m.color = `var(--s${i + 1})`);
 const FLOORS = [[10,19,'Étage 1 (haut)'],[20,29,'Étage 2'],[30,39,'Étage 3'],[40,49,'Étage 4'],[50,59,'Étage 5'],[60,69,'Étage 6 (bas)']];
@@ -329,7 +329,7 @@ function renderOverview() {
     <table>
       <thead><tr><th>Machine</th><th class="n">Stock</th><th class="n">Remplissage</th><th class="n">Vides</th><th class="n">Ventes 24 h</th><th class="n">Ventes 7 j</th><th>Dernier reload</th><th>Dernier changement</th></tr></thead>
       <tbody>${rows.map(r => `<tr>
-        <td><i class="sw" style="background:${r.m.color}"></i><a href="?m=${r.m.slug}" data-m="${r.m.slug}">${esc(r.m.name)}</a></td>
+        <td><i class="sw" style="background:${r.m.color}"></i><a href="?m=${r.m.slug}" data-m="${r.m.slug}">${esc(r.m.name)}</a>${r.m.note ? `<div class="muted small">${esc(r.m.note)}</div>` : ''}</td>
         <td class="n">${r.last ? r.t.units : '—'}</td>
         <td class="n">${r.t.cap ? Math.round(100 * r.t.units / r.t.cap) + ' %' : '—'}</td>
         <td class="n">${r.last ? r.t.empty : '—'}</td>
@@ -412,7 +412,7 @@ function renderMachine() {
 
   app.innerHTML = `
   <section class="panel">
-    <h2>${esc(m.name)} : comparer deux moments</h2>
+    <h2>${esc(m.name)} : comparer deux moments${m.note ? ` <span class="muted small">(${esc(m.note)})</span>` : ''}</h2>
     <div class="row" style="margin-bottom:10px">
       <label class="f">Reload à analyser (A = juste avant, B = juste après)<select id="selR"><option value="">${ev.length ? '— choisir un reload —' : 'aucun reload détecté pour l’instant'}</option>
         ${ev.map((e, k) => ({ e, k })).reverse().map(({ e, k }) => `<option value="${k}" ${e.a === a && e.b === b ? 'selected' : ''}>${esc(fmtDT.format(tl[e.b].t))} · +${e.loaded} rechargés${e.opened ? ' · ' + e.opened + ' display' + (e.opened > 1 ? 's' : '') + ' ouvert' + (e.opened > 1 ? 's' : '') : ''}</option>`).join('')}
